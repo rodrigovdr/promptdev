@@ -188,7 +188,6 @@ def transcribe(audio_path):
     global whisper
     print("\n[⏳] Transcrevendo áudio com filtros anti-alucinação...")
 
-    # Parâmetros de decodificação anti-alucinação
     decode_params = dict(
         language=None,
         task="transcribe",
@@ -197,7 +196,7 @@ def transcribe(audio_path):
         temperature=0.0,
         condition_on_previous_text=False,
         no_speech_threshold=0.6,
-        logprob_threshold=-1.0,
+        log_prob_threshold=-1.0,
         compression_ratio_threshold=2.4,
     )
 
@@ -218,22 +217,26 @@ def transcribe(audio_path):
         if not speech_chunks:
             if not is_silence(audio_data):
                 segments, _ = whisper.transcribe(audio_data, **decode_params)
-                full_transcription = [seg.text.strip() for seg in segments if seg.no_speech_prob < 0.6]
+                full_transcription = [
+                    seg.text.strip()
+                    for seg in segments
+                    if seg.no_speech_prob < 0.6
+                ]
         else:
             for chunk in speech_chunks:
                 start_sample = chunk["start"]
                 end_sample = chunk["end"]
                 chunk_audio = audio_data[start_sample:end_sample]
 
-                # Descarta fatias minúsculas ou sem energia audível
-                if len(chunk_audio) < int(samplerate * 0.3) or is_silence(chunk_audio):
+                if len(chunk_audio) < int(samplerate * 0.3) or is_silence(
+                    chunk_audio
+                ):
                     continue
 
                 segments, _ = whisper.transcribe(chunk_audio, **decode_params)
 
                 chunk_text_parts = []
                 for seg in segments:
-                    # Só aceita se não for identificado como ruído/silêncio
                     if seg.no_speech_prob < 0.6 and seg.text.strip():
                         chunk_text_parts.append(seg.text.strip())
 
@@ -249,7 +252,9 @@ def transcribe(audio_path):
             WHISPER_MODEL_SIZE, device="cpu", compute_type="int8", cpu_threads=6
         )
         segments, _ = whisper.transcribe(audio_path, **decode_params)
-        text = " ".join([seg.text.strip() for seg in segments if seg.no_speech_prob < 0.6]).strip()
+        text = " ".join(
+            [seg.text.strip() for seg in segments if seg.no_speech_prob < 0.6]
+        ).strip()
 
     if os.path.exists(audio_path):
         os.remove(audio_path)
