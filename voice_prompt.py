@@ -49,15 +49,16 @@ PROVIDER = CONFIG.get("provider", "ollama").lower()
 LLM_MODEL = CONFIG.get("model", "qwen3.5:9b")
 WHISPER_MODEL_SIZE = CONFIG.get("whisper_model", "large-v3-turbo")
 
-# Exemplo de contexto estilístico para guiar a alternância de idiomas
+# Lista de vocabulário limpa (sem sentenças completas para evitar alucinações durante pausas)
 BILINGUAL_PROMPT_BIAS = (
-    "Exemplo de transcrição: No frontend, a mensagem na tela deve ser 'Please enter your username and password' "
-    "e no backend o status code deve ser 400 Bad Request."
+    "Glossário técnico PT-BR e EN: UI, UX, frontend, backend, card, title, description, "
+    "highlights, gauge, speedometer, payload, endpoint, API, link, modal, state, hook, "
+    "header, footer, button, submit, click, badge, layout, workflow, status, release."
 )
 
 
 def detect_hardware():
-    """Detecta a GPU instalada e verifica a presença real de DLLs CUDA no ambiente."""
+    """Detecta a GPU instalada e verifica a presença de DLLs CUDA no ambiente."""
     gpu_vendor = "CPU"
     gpu_name = "Nenhuma detectada"
     has_cuda_libs = False
@@ -101,7 +102,7 @@ GPU_VENDOR, GPU_NAME, HAS_CUDA_LIBS = detect_hardware()
 print("=" * 60)
 print(f"[🔍 Hardware]: {GPU_NAME} ({GPU_VENDOR})")
 print(f"[🤖 Provedor LLM]: {PROVIDER.upper()} | Modelo: {LLM_MODEL}")
-print(f"[🎙️ Modelo STT]: Whisper ({WHISPER_MODEL_SIZE} - VAD Chunking Bilíngue)")
+print(f"[🎙️ Modelo STT]: Whisper ({WHISPER_MODEL_SIZE} - VAD Chunking)")
 
 if GPU_VENDOR == "NVIDIA" and HAS_CUDA_LIBS:
     print("[🚀 Modo STT]: NVIDIA CUDA (GPU Whisper)")
@@ -177,9 +178,28 @@ def record_audio(samplerate=16000):
         return temp_wav.name
 
 
+def is_silence(audio_chunk, threshold=0.005):
+    """Calcula a energia RMS para descartar pedaços contendo apenas ruído de fundo/ar."""
+    rms = np.sqrt(np.mean(np.square(audio_chunk)))
+    return rms < threshold
+
+
 def transcribe(audio_path):
     global whisper
-    print("\n[⏳] Transcrevendo áudio bilíngue com detecção dinâmica por bloco...")
+    print("\n[⏳] Transcrevendo áudio com filtros anti-alucinação...")
+
+    # Parâmetros de decodificação anti-alucinação
+    decode_params = dict(
+        language=None,
+        task="transcribe",
+        initial_prompt=BILINGUAL_PROMPT_BIAS,
+        beam_size=5,
+        temperature=0.0,
+        condition_on_previous_text=False,
+        no_speech_threshold=0.6,
+        logprob_threshold=-1.0,
+        compression_ratio_threshold=2.4,
+    )
 
     try:
         audio_data, samplerate = sf.read(audio_path, dtype="float32")
@@ -187,44 +207,37 @@ def transcribe(audio_path):
             audio_data = audio_data.mean(axis=1)
 
         vad_options = VadOptions(
-            min_silence_duration_ms=350,
-            speech_pad_ms=200,
-            threshold=0.35,
+            min_silence_duration_ms=400,
+            speech_pad_ms=250,
+            threshold=0.40,
         )
         speech_chunks = get_speech_timestamps(audio_data, vad_options)
 
         full_transcription = []
 
         if not speech_chunks:
-            segments, _ = whisper.transcribe(
-                audio_data,
-                language=None,
-                task="transcribe",
-                initial_prompt=BILINGUAL_PROMPT_BIAS,
-                beam_size=5,
-                condition_on_previous_text=False,
-            )
-            full_transcription = [seg.text.strip() for seg in segments]
+            if not is_silence(audio_data):
+                segments, _ = whisper.transcribe(audio_data, **decode_params)
+                full_transcription = [seg.text.strip() for seg in segments if seg.no_speech_prob < 0.6]
         else:
             for chunk in speech_chunks:
                 start_sample = chunk["start"]
                 end_sample = chunk["end"]
                 chunk_audio = audio_data[start_sample:end_sample]
 
-                if len(chunk_audio) < int(samplerate * 0.3):
+                # Descarta fatias minúsculas ou sem energia audível
+                if len(chunk_audio) < int(samplerate * 0.3) or is_silence(chunk_audio):
                     continue
 
-                segments, _ = whisper.transcribe(
-                    chunk_audio,
-                    language=None,
-                    task="transcribe",
-                    initial_prompt=BILINGUAL_PROMPT_BIAS,
-                    beam_size=5,
-                    temperature=0.0,
-                    condition_on_previous_text=False,
-                )
+                segments, _ = whisper.transcribe(chunk_audio, **decode_params)
 
-                chunk_text = " ".join([seg.text.strip() for seg in segments]).strip()
+                chunk_text_parts = []
+                for seg in segments:
+                    # Só aceita se não for identificado como ruído/silêncio
+                    if seg.no_speech_prob < 0.6 and seg.text.strip():
+                        chunk_text_parts.append(seg.text.strip())
+
+                chunk_text = " ".join(chunk_text_parts).strip()
                 if chunk_text:
                     full_transcription.append(chunk_text)
 
@@ -235,15 +248,8 @@ def transcribe(audio_path):
         whisper = WhisperModel(
             WHISPER_MODEL_SIZE, device="cpu", compute_type="int8", cpu_threads=6
         )
-        segments, _ = whisper.transcribe(
-            audio_path,
-            language=None,
-            task="transcribe",
-            initial_prompt=BILINGUAL_PROMPT_BIAS,
-            beam_size=5,
-            condition_on_previous_text=False,
-        )
-        text = " ".join([seg.text.strip() for seg in segments]).strip()
+        segments, _ = whisper.transcribe(audio_path, **decode_params)
+        text = " ".join([seg.text.strip() for seg in segments if seg.no_speech_prob < 0.6]).strip()
 
     if os.path.exists(audio_path):
         os.remove(audio_path)
@@ -423,7 +429,7 @@ def main():
     if choice == "1":
         system_prompt = """Você é um especialista em Prompt Engineering para ferramentas de desenvolvimento de software (Cursor, Claude Code, Aider, Copilot, ChatGPT).
 Transforme o áudio transcrito pelo desenvolvedor em um prompt técnico de alta qualidade, direto e pronto para execução.
-Preserve integralmente e com precisão todas as strings literais em inglês (textos de tela, botões, mensagens de erro, etc.).
+Preserve integralmente e com precisão todas as strings literais em inglês (textos de tela, botões, títulos de cards, mensagens de erro, etc.).
 
 Formato esperado:
 - **Objetivo:** Uma frase clara do que deve ser feito.
