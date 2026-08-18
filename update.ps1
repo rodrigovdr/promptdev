@@ -51,18 +51,27 @@ if (![string]::IsNullOrWhiteSpace($CustomPath)) {
 $ConfigFile = Join-Path $InstallDir "config.json"
 $CurrentProvider = "ollama"
 $CurrentModel = "qwen3.5:9b"
+$CurrentReasoning = "low"
+$CurrentWhisper = "large-v3-turbo"
 
 if (Test-Path -LiteralPath $ConfigFile) {
     try {
         $ExistingCfg = Get-Content -LiteralPath $ConfigFile -Raw | ConvertFrom-Json
-        $CurrentProvider = $ExistingCfg.provider
-        $CurrentModel = $ExistingCfg.model
+        if ($ExistingCfg.provider) { $CurrentProvider = $ExistingCfg.provider }
+        if ($ExistingCfg.model) { $CurrentModel = $ExistingCfg.model }
+        if ($ExistingCfg.reasoning_effort) { $CurrentReasoning = $ExistingCfg.reasoning_effort }
+        if ($ExistingCfg.whisper_model) { $CurrentWhisper = $ExistingCfg.whisper_model }
     } catch {}
 }
 
 # 3. Menu de Ajuste do Provedor LLM
-Write-Host "`nProvedor Atual: $CurrentProvider | Modelo: $CurrentModel" -ForegroundColor DarkCyan
-Write-Host "Deseja alterar o provedor/modelo de IA?" -ForegroundColor Yellow
+Write-Host "`nConfiguração Atual:" -ForegroundColor DarkCyan
+Write-Host " -> Provedor: $CurrentProvider"
+Write-Host " -> Modelo: $CurrentModel"
+Write-Host " -> Reasoning Effort: $CurrentReasoning"
+Write-Host " -> Modelo Whisper: $CurrentWhisper"
+
+Write-Host "`nDeseja alterar o provedor/modelo de IA?" -ForegroundColor Yellow
 Write-Host " [0] Manter configuração atual"
 Write-Host " [1] Usar Ollama"
 Write-Host " [2] Usar LM Studio"
@@ -78,15 +87,22 @@ if ($Choice.Trim() -eq "1") {
     $CurrentModel = if ([string]::IsNullOrWhiteSpace($ModelInput)) { "qwen/qwen3.5-9b" } else { $ModelInput.Trim() }
 }
 
+Write-Host "`nNível de Raciocínio (Reasoning Effort) [none / low / medium / high]:" -ForegroundColor Yellow
+$ReasoningInput = Read-Host "Opção [ENTER para '$CurrentReasoning']"
+if (![string]::IsNullOrWhiteSpace($ReasoningInput)) {
+    $CurrentReasoning = $ReasoningInput.Trim().ToLower()
+}
+
 $ConfigObj = @{
-    provider      = $CurrentProvider
-    model         = $CurrentModel
-    whisper_model = "large-v3-turbo"
-    ollama_url    = "http://localhost:11434/api/generate"
-    lmstudio_url  = "http://localhost:1234/v1/chat/completions"
+    provider         = $CurrentProvider
+    model            = $CurrentModel
+    reasoning_effort = $CurrentReasoning
+    whisper_model    = $CurrentWhisper
+    ollama_url       = "http://localhost:11434/api/generate"
+    lmstudio_url     = "http://localhost:1234/v1/chat/completions"
 }
 $ConfigObj | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $ConfigFile -Encoding UTF8
-Write-Host "Configuração salva: $CurrentProvider ($CurrentModel)" -ForegroundColor Green
+Write-Host "Configuração salva: $CurrentProvider | Modelo: $CurrentModel | Reasoning: $CurrentReasoning" -ForegroundColor Green
 
 $VenvPython = Join-Path $InstallDir "venv\Scripts\python.exe"
 $VenvPip    = Join-Path $InstallDir "venv\Scripts\pip.exe"
@@ -103,16 +119,23 @@ if (!(Test-Path -LiteralPath $VenvPython)) {
 & $VenvPip install --upgrade pip
 & $VenvPip install --upgrade faster-whisper sounddevice soundfile numpy pyperclip requests
 
+# Verifica se GPU NVIDIA está presente para atualizar pacotes CUDA
+$GpuInfo = Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name
+if ($GpuInfo -match "NVIDIA") {
+    Write-Host "-> GPU NVIDIA detectada. Atualizando bibliotecas CUDA..." -ForegroundColor Green
+    & $VenvPip install --upgrade nvidia-cublas-cu12 nvidia-cudnn-cu12
+}
+
 # 5. Sincronização do Modelo se Ollama
 if ($CurrentProvider -eq "ollama") {
-    Write-Host "==> [3/3] Sincronizando modelo no Ollama ($CurrentModel)..." -ForegroundColor Cyan
+    Write-Host "`n==> [3/3] Sincronizando modelo no Ollama ($CurrentModel)..." -ForegroundColor Cyan
     try {
         ollama pull $CurrentModel
     } catch {
         Write-Warning "Ollama não respondeu. Certifique-se de executar 'ollama pull $CurrentModel' manualmente."
     }
 } else {
-    Write-Host "==> [3/3] LM Studio configurado." -ForegroundColor Cyan
+    Write-Host "`n==> [3/3] LM Studio configurado." -ForegroundColor Cyan
 }
 
 # 6. Atualização do $PROFILE

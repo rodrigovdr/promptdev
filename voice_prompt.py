@@ -27,6 +27,7 @@ CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 DEFAULT_CONFIG = {
     "provider": "ollama",
     "model": "qwen3.5:9b",
+    "reasoning_effort": "low",  # "none", "low", "medium", "high"
     "whisper_model": "large-v3-turbo",
     "ollama_url": "http://localhost:11434/api/generate",
     "lmstudio_url": "http://localhost:1234/v1/chat/completions",
@@ -47,9 +48,9 @@ def load_config():
 CONFIG = load_config()
 PROVIDER = CONFIG.get("provider", "ollama").lower()
 LLM_MODEL = CONFIG.get("model", "qwen3.5:9b")
+REASONING_EFFORT = CONFIG.get("reasoning_effort", "low").lower()
 WHISPER_MODEL_SIZE = CONFIG.get("whisper_model", "large-v3-turbo")
 
-# Lista de vocabulário limpa (sem sentenças completas para evitar alucinações durante pausas)
 BILINGUAL_PROMPT_BIAS = (
     "Glossário técnico PT-BR e EN: UI, UX, frontend, backend, card, title, description, "
     "highlights, gauge, speedometer, payload, endpoint, API, link, modal, state, hook, "
@@ -101,7 +102,7 @@ def detect_hardware():
 GPU_VENDOR, GPU_NAME, HAS_CUDA_LIBS = detect_hardware()
 print("=" * 60)
 print(f"[🔍 Hardware]: {GPU_NAME} ({GPU_VENDOR})")
-print(f"[🤖 Provedor LLM]: {PROVIDER.upper()} | Modelo: {LLM_MODEL}")
+print(f"[🤖 Provedor LLM]: {PROVIDER.upper()} | Modelo: {LLM_MODEL} | Reasoning: {REASONING_EFFORT}")
 print(f"[🎙️ Modelo STT]: Whisper ({WHISPER_MODEL_SIZE} - VAD Chunking)")
 
 if GPU_VENDOR == "NVIDIA" and HAS_CUDA_LIBS:
@@ -228,9 +229,7 @@ def transcribe(audio_path):
                 end_sample = chunk["end"]
                 chunk_audio = audio_data[start_sample:end_sample]
 
-                if len(chunk_audio) < int(samplerate * 0.3) or is_silence(
-                    chunk_audio
-                ):
+                if len(chunk_audio) < int(samplerate * 0.3) or is_silence(chunk_audio):
                     continue
 
                 segments, _ = whisper.transcribe(chunk_audio, **decode_params)
@@ -262,6 +261,11 @@ def transcribe(audio_path):
     return text
 
 
+def filter_think_tags(text):
+    """Remove blocos <think>...</think> caso o modelo emita tags de raciocínio."""
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+
 def call_local_llm(system_prompt, user_text):
     full_text = []
 
@@ -281,6 +285,11 @@ def call_local_llm(system_prompt, user_text):
             "temperature": 0.3,
             "stream": True,
         }
+
+        # Configura o reasoning_effort nativo do LM Studio / OpenAI
+        if REASONING_EFFORT in ["none", "low", "medium", "high"]:
+            payload["reasoning_effort"] = REASONING_EFFORT
+
         try:
             response = requests.post(
                 url, json=payload, stream=True, timeout=(10, None)
@@ -289,9 +298,10 @@ def call_local_llm(system_prompt, user_text):
                 return f"Erro na API do LM Studio (Status {response.status_code}): {response.text}"
 
             print("\n" + "=" * 50)
-            print("⚡ PROCESSANDO VIA LM STUDIO:")
+            print(f"⚡ PROCESSANDO VIA LM STUDIO (Reasoning: {REASONING_EFFORT}):")
             print("=" * 50)
 
+            in_think_block = False
             for line in response.iter_lines():
                 if line:
                     line_str = line.decode("utf-8")
@@ -300,6 +310,17 @@ def call_local_llm(system_prompt, user_text):
                         choices = data.get("choices", [])
                         if choices:
                             delta = choices[0].get("delta", {}).get("content", "")
+                            
+                            # Filtra saída de pensamento em tempo real
+                            if "<think>" in delta:
+                                in_think_block = True
+                                continue
+                            if "</think>" in delta:
+                                in_think_block = False
+                                continue
+                            if in_think_block:
+                                continue
+
                             print(delta, end="", flush=True)
                             full_text.append(delta)
 
@@ -313,12 +334,20 @@ def call_local_llm(system_prompt, user_text):
 
     else:  # Ollama
         url = CONFIG.get("ollama_url", "http://localhost:11434/api/generate")
+        
+        # Suprime divagações longas no Ollama ajustando opções
+        options = {"temperature": 0.3}
+        if REASONING_EFFORT == "none":
+            options["think"] = False
+        elif REASONING_EFFORT == "low":
+            options["num_predict"] = 1500
+
         payload = {
             "model": LLM_MODEL,
             "prompt": f"{system_prompt}\n\nTexto/Requisitos brutos:\n{user_text}",
             "stream": True,
             "keep_alive": "1h",
-            "options": {"temperature": 0.3},
+            "options": options,
         }
         try:
             response = requests.post(
@@ -335,13 +364,24 @@ def call_local_llm(system_prompt, user_text):
                 )
 
             print("\n" + "=" * 50)
-            print("⚡ PROCESSANDO VIA OLLAMA:")
+            print(f"⚡ PROCESSANDO VIA OLLAMA (Reasoning: {REASONING_EFFORT}):")
             print("=" * 50)
 
+            in_think_block = False
             for line in response.iter_lines():
                 if line:
                     chunk = json.loads(line.decode("utf-8"))
                     token = chunk.get("response", "")
+
+                    if "<think>" in token:
+                        in_think_block = True
+                        continue
+                    if "</think>" in token:
+                        in_think_block = False
+                        continue
+                    if in_think_block:
+                        continue
+
                     print(token, end="", flush=True)
                     full_text.append(token)
 
@@ -442,7 +482,7 @@ Formato esperado:
 - **Instruções Detalhadas / Passos de Execução:** Dividido em tópicos lógicos e precisos.
 - **Critérios de Aceite / Restrições:** O que NÃO fazer, regras de tipagem, testes ou padrões esperados.
 
-Retorne APENAS o prompt final formatado em Markdown, sem saudações ou explicações adicionais."""
+Retorne APENAS o prompt final formatado em Markdown, sem tags de pensamento e sem saudações adicionais."""
 
         output = call_local_llm(system_prompt, raw_text)
 
@@ -458,6 +498,9 @@ Não invente requisitos adicionais e mantenha a intenção exata do autor."""
     else:
         print("Operação cancelada.")
         return
+
+    # Garante que nenhuma tag <think> remanescente seja salva
+    output = filter_think_tags(output)
 
     file_path = get_next_output_path()
     with open(file_path, "w", encoding="utf-8") as f:

@@ -80,11 +80,12 @@ Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
 # 5. Criação do arquivo de Configuração config.json
 Write-Host "==> [3/6] Criando configuração ($Provider | $ModelName)..." -ForegroundColor Cyan
 $ConfigObj = @{
-    provider      = $Provider
-    model         = $ModelName
-    whisper_model = "large-v3-turbo"
-    ollama_url    = "http://localhost:11434/api/generate"
-    lmstudio_url  = "http://localhost:1234/v1/chat/completions"
+    provider         = $Provider
+    model            = $ModelName
+    reasoning_effort = "low"
+    whisper_model    = "large-v3-turbo"
+    ollama_url       = "http://localhost:11434/api/generate"
+    lmstudio_url     = "http://localhost:1234/v1/chat/completions"
 }
 $ConfigObj | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $ConfigFile -Encoding UTF8
 
