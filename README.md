@@ -1,8 +1,25 @@
 # Voice Prompt CLI (100% Local AI)
 
-Ferramenta CLI para captura de áudio, transcrição de voz com **suporte bilíngue simultâneo (PT-BR + EN)** e refinamento de prompts técnicos para desenvolvimento de software utilizando **Ollama** ou **LM Studio** e modelos de linguagem locais.
+Ferramenta CLI para captura de áudio, transcrição de voz com **suporte bilíngue simultâneo (PT-BR + EN)** e refinamento de prompts técnicos para desenvolvimento de software utilizando **Ollama** ou **LM Studio** e modelos de linguagem locais (como `qwen3.5:9b`).
 
 Todo o processamento — desde a captura do microfone, transcrição STT via `faster-whisper` (`large-v3-turbo`) até a geração de texto via LLM — roda **100% offline e localmente na sua máquina**, sem envio de dados ou áudios para a nuvem.
+
+---
+
+## 🧠 Controle de Reasoning Effort (Raciocínio Local)
+
+Modelos recentes focados em raciocínio (como a família **Qwen 2.5 / 3.5** ou **DeepSeek R1**) tendem a gerar longas cadeias de pensamento interno (*chain-of-thought*) antes de responder, o que pode aumentar a latência para tarefas diretas de estruturação de texto.
+
+O Voice Prompt CLI inclui controle granular de esforço de raciocínio (`reasoning_effort`) configurável via `config.json` ou pelo script `update.ps1`:
+
+| Nível | Comportamento | Quando usar |
+| :--- | :--- | :--- |
+| **`none`** | Desativa tokens de pensamento/raciocínio interno. Resposta instantânea. | Instruções curtas, formatação direta de texto ou transcrições simples. |
+| **`low`** *(Padrão)* | Raciocínio leve e direto. Filtra divagações excessivas sem perder coerência. | **Ideal para Master Prompt Dev.** Entrega rápida e excelente estruturação. |
+| **`medium`** | Raciocínio equilibrado para estruturação de escopo intermediário. | Requisitos com múltiplas dependências lógicas ou regras de negócio. |
+| **`high`** | Raciocínio profundo e exaustivo. Maior tempo de resposta. | Tarefas arquiteturais complexas, refatorações amplas ou diagramação de sistemas. |
+
+> **Nota:** As tags internas `<think>...</think>` são filtradas automaticamente durante o streaming para manter o terminal e o arquivo final limpos.
 
 ---
 
@@ -63,9 +80,9 @@ O script realiza **auto-detecção de hardware** em tempo de execução, adaptan
 
 ---
 
-## 🔄 Atualização e Troca de Provedor (`update.ps1`)
+## 🔄 Atualização e Configuração (`update.ps1`)
 
-Para trocar de provedor (Ollama $\leftrightarrow$ LM Studio), alterar o modelo, sincronizar novos códigos ou atualizar bibliotecas:
+Para alternar entre provedores (Ollama $\leftrightarrow$ LM Studio), ajustar o nível de raciocínio (`reasoning_effort`), alterar o modelo, sincronizar novos códigos ou atualizar bibliotecas:
 
 ```powershell
 .\update.ps1
@@ -75,39 +92,13 @@ Para trocar de provedor (Ollama $\leftrightarrow$ LM Studio), alterar o modelo, 
 
 ## ⚙️ Arquivo de Configuração (`config.json`)
 
-As configurações de execução ficam salvas em `C:\tools\voice-prompt\config.json`:
+As configurações de execução ficam centralizadas em `C:\tools\voice-prompt\config.json`:
 
 ```json
 {
   "provider": "ollama",
   "model": "qwen3.5:9b",
+  "reasoning_effort": "low",
   "whisper_model": "large-v3-turbo",
   "ollama_url": "http://localhost:11434/api/generate",
-  "lmstudio_url": "http://localhost:1234/v1/chat/completions"
-}
-```
-
-* **`provider`:** `"ollama"` ou `"lmstudio"`.
-* **`model`:** Nome da tag/modelo no provedor ativo.
-* **`whisper_model`:** Modelo Whisper para transcrição (padrão recomendado: `"large-v3-turbo"`).
-* **`ollama_url` / `lmstudio_url`:** Endpoints das APIs locais.
-
----
-
-## 🎙️ Como Usar
-
-Em qualquer terminal do PowerShell, digite:
-
-```powershell
-promptdev
-```
-
-### Opções do Menu:
-* `[1] 🚀 Master Prompt Dev`: Converte o áudio falado em um prompt estruturado para agentes de código (Claude Code, Cursor, Aider, Copilot) com Objetivo, Contexto, Passos e Critérios de Aceite.
-* `[2] 🧹 Apenas organizar e pontuar`: Corrige vícios de fala e formata o texto mantendo as frases em inglês intactas.
-* `[3] 📋 Usar apenas a transcrição bruta`: Retorna o texto exatamente como reconhecido pelo Whisper.
-
-Ao finalizar:
-1. O texto gerado é exibido via streaming no console.
-2. O conteúdo é **copiado automaticamente para a Área de Transferência**.
-3. Um arquivo Markdown `.md` é salvo em `output/` e aberto no editor de código padrão.
+  "lmstudio_url": "

@@ -1,8 +1,25 @@
 # Voice Prompt CLI (100% Local AI)
 
-A lightweight, hardware-adaptive CLI tool for Windows that captures voice dictation, performs **real-time bilingual speech-to-text (Portuguese + English)**, and refines spoken developer instructions into execution-ready prompts for coding agents (Claude Code, Cursor, Aider, GitHub Copilot) using local LLMs via **Ollama** or **LM Studio**.
+A lightweight, hardware-adaptive CLI tool for Windows that captures voice dictation, performs **real-time bilingual speech-to-text (Portuguese + English)**, and refines spoken developer instructions into execution-ready prompts for coding agents (Claude Code, Cursor, Aider, GitHub Copilot) using local LLMs via **Ollama** or **LM Studio** (e.g., `qwen3.5:9b`).
 
 All audio processing and language inference run **100% locally and offline** on your machine. No telemetry, audio data, or prompt text ever leaves your system.
+
+---
+
+## 🧠 Reasoning Effort Control
+
+Modern reasoning-focused models (such as **Qwen 2.5 / 3.5** or **DeepSeek R1**) often engage in deep internal *chain-of-thought* reasoning before emitting tokens. While valuable for complex problem solving, this can introduce unnecessary latency for formatting developer prompts.
+
+Voice Prompt CLI provides explicit control over reasoning effort (`reasoning_effort`) configurable via `config.json` or through `update.ps1`:
+
+| Level | Behavior | Recommended Use Case |
+| :--- | :--- | :--- |
+| **`none`** | Disables reasoning/thinking tokens completely. Instant response time. | Short instructions, simple text cleanups, and raw transcripts. |
+| **`low`** *(Default)* | Lightweight internal reasoning. Eliminates overthinking while keeping structure sharp. | **Recommended for Master Prompt Dev.** Optimal balance of speed and precision. |
+| **`medium`** | Balanced reasoning for moderately complex specifications. | Requirements involving multiple architectural dependencies or multi-step logic. |
+| **`high`** | Full, exhaustive reasoning budget. Longer generation time. | Broad system refactors, complex architecture planning, or database schema design. |
+
+> **Note:** Internal `<think>...</think>` tokens are stripped automatically during real-time streaming to keep the console output and markdown deliverables clean.
 
 ---
 
@@ -66,9 +83,9 @@ The application automatically inspects available GPU controllers and chooses the
 
 ---
 
-## 🔄 Maintenance & Provider Switching (`update.ps1`)
+## 🔄 Maintenance & Configuration (`update.ps1`)
 
-To switch providers between Ollama and LM Studio, change target models, update Python packages, or sync code updates, run:
+To switch providers between Ollama and LM Studio, adjust the `reasoning_effort` level, change target models, update Python packages, or sync code updates, run:
 
 ```powershell
 .\update.ps1
@@ -84,6 +101,7 @@ Runtime settings are stored in `C:\tools\voice-prompt\config.json`. You can modi
 {
   "provider": "ollama",
   "model": "qwen3.5:9b",
+  "reasoning_effort": "low",
   "whisper_model": "large-v3-turbo",
   "ollama_url": "http://localhost:11434/api/generate",
   "lmstudio_url": "http://localhost:1234/v1/chat/completions"
@@ -92,6 +110,7 @@ Runtime settings are stored in `C:\tools\voice-prompt\config.json`. You can modi
 
 * **`provider`:** `"ollama"` or `"lmstudio"`.
 * **`model`:** Target model identifier loaded in your local server.
+* **`reasoning_effort`:** Reasoning effort level (`"none"`, `"low"`, `"medium"`, `"high"`).
 * **`whisper_model`:** Faster-Whisper model checkpoint (defaults to `"large-v3-turbo"`).
 * **`ollama_url` / `lmstudio_url`:** Local HTTP API endpoints.
 
